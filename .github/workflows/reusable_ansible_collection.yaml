@@ -1,0 +1,438 @@
+---
+
+name: 'Ansible Collection'
+
+
+on:
+  workflow_call:
+    inputs:
+      ANSIBLE_COLLECTION_MARK_RELEASE_LIVE:
+        default: true
+        required: false
+        description: "Remove 'Draft' status on the the Github Release."
+        type: boolean
+      ANSIBLE_GALAXY_NAMESPACE:
+        default: "${{ github.repository_owner }}"
+        required: false
+        description: Namespace on Ansible Galaxy.
+        type: string
+      ANSIBLE_GALAXY_PACKAGE_NAME:
+        default: "${{ github.event.repository.name }}"
+        required: false
+        description: Collection name to use when publishing to Ansible Galaxy.
+        type: string
+      ANSIBLE_GALAXY_SERVER_URL:
+        default: https://galaxy.ansible.com
+        required: false
+        description: Collection name to use when publishing to Ansible Galaxy.
+        type: string
+      ANSIBLE_LINTING_MUST_PASS:
+        default: true
+        required: false
+        description: Fail the linting action if the tests failed
+        type: boolean
+
+    secrets:
+      ANSIBLE_GALAXY_UPLOAD_TOKEN:
+        description: Token used to upload Collection to Ansible Galaxy.
+        required: false
+
+
+jobs:
+
+
+  lint:
+    name: 'Lint'
+    env:
+      ANSIBLE_LINT_PATH: 'meta/ playbooks/ roles/'
+    runs-on: ubuntu-latest
+    steps:
+
+
+      - name: Checkout Code - ${{ github.ref_name }}
+        uses: actions/checkout@v4
+
+
+      - name: Install Dependencies
+        shell: bash
+        run: |
+          pip install \
+            pipenv==2022.1.8 \
+            wheel  \
+            ansible \
+            setuptools_rust \
+            Rust  \
+            ansible-lint==24.7.0 \
+            yamllint==1.35.1 \
+            lxml \
+            ansible-lint-junit==0.17.7 \
+            ansible-lint-to-junit-xml==0.1.0;
+
+
+      - name: Create Artifact directory
+        shell: bash
+        run: |
+          mkdir -p artifacts
+
+
+      - name: Lint
+        id: lint
+        shell: bash
+        run: |
+          ansible-lint -q \
+            --nocolor \
+            --parseable ${{ env.ANSIBLE_LINT_PATH }} > "artifacts/ansible-lint.log" 1>&1 || ANSIBLE_LINT=$?
+
+            if [ "${ANSIBLE_LINT}" ]; then
+
+              echo "exit_code=${ANSIBLE_LINT}" >> $GITHUB_OUTPUT
+
+            else
+
+              echo "exit_code=0" >> $GITHUB_OUTPUT
+
+            fi
+
+            echo "[Trace] GITHUB_OUTPUT[$(cat $GITHUB_OUTPUT)]";
+
+
+      - name: Convert Lint log to JUnit Test report
+        id: junit-test-report
+        shell: bash
+        run: |
+          cat "artifacts/ansible-lint.log" | \
+            ansible-lint-to-junit-xml > "artifacts/ansible-lint.junit.xml" 1>&1 || ANSIBLE_LINT_JUNIT=$?
+
+
+            if [ "${ANSIBLE_LINT_JUNIT}" ]; then
+
+              echo "exit_code=${ANSIBLE_LINT_JUNIT}" >> $GITHUB_OUTPUT
+
+            else
+
+              echo "exit_code=0" >> $GITHUB_OUTPUT
+
+            fi
+
+
+      - name: Check if JUnit Test Report was Successful
+        shell: bash
+        run: |
+          if [ ${{ steps.junit-test-report.outputs.exit_code }} -gt 0 ]; then
+
+            echo "[Error] ANSIBLE_LINT_JUNIT failed with ${{ steps.junit-test-report.outputs.exit_code }}";
+
+          fi
+
+
+      - name: Check if Linting Error Occured
+        shell: bash
+        run: |
+          if [ ${{ steps.lint.outputs.exit_code }} -ge 3 ]; then
+
+            echo "[Error] ansible lint failed with  ${{ steps.lint.outputs.exit_code }}";
+            
+            exit ${{ steps.lint.outputs.exit_code }};
+
+          fi # don't fail the job?? 1=failed test, 2=failed command i.e. switch/flag
+
+
+      - name: Upload build Artifact
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-collection-lint
+          path: artifacts/
+
+
+      - name: Should the Job be force failed?
+        shell: bash
+        run: |
+          if [ "0${{ inputs.ANSIBLE_LINTING_MUST_PASS }}" == "0true" ]; then
+
+            if [ ${{ steps.lint.outputs.exit_code }} -gt 0 ]; then
+
+              echo "[Trace] ANSIBLE_LINTING_MUST_PASS[${{ inputs.ANSIBLE_LINTING_MUST_PASS }}]";
+              
+              echo "[Error] ansible lint failed with ${{ steps.lint.outputs.exit_code }}";
+            
+              exit ${{ steps.lint.outputs.exit_code }};
+          
+            fi
+
+          fi
+
+
+
+  lint-galaxy-yaml:
+    name: 'Lint (galaxy.yaml)'
+    # if: github.event.commits[0].author.name != 'nfc-bot'
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_LINT_PATH: 'galaxy.y*'
+    steps:
+
+
+      - name: Checkout Code - ${{ github.ref_name }}
+        uses: actions/checkout@v4
+
+
+      - name: Install Dependencies
+        shell: bash
+        run: |
+          pip install \
+            pipenv==2022.1.8 \
+            wheel  \
+            ansible \
+            setuptools_rust \
+            Rust  \
+            ansible-lint==24.7.0 \
+            yamllint==1.35.1 \
+            lxml \
+            ansible-lint-junit==0.17.7 \
+            ansible-lint-to-junit-xml==0.1.0;
+
+
+      - name: Create Artifact directory
+        shell: bash
+        run: |
+          mkdir -p artifacts
+
+
+      - name: Lint
+        id: lint
+        shell: bash
+        run: |
+          ansible-lint -q \
+            --nocolor \
+            --parseable ${{ env.ANSIBLE_LINT_PATH }} > "artifacts/ansible-lint.log" 1>&1 || ANSIBLE_LINT=$?
+
+            if [ "${ANSIBLE_LINT}" ]; then
+
+              echo "exit_code=${ANSIBLE_LINT}" >> $GITHUB_OUTPUT
+
+            else
+
+              echo "exit_code=0" >> $GITHUB_OUTPUT
+
+            fi
+
+            echo "[Trace] GITHUB_OUTPUT[$(cat $GITHUB_OUTPUT)]";
+
+
+      - name: Convert Lint log to JUnit Test report
+        id: junit-test-report
+        shell: bash
+        run: |
+          cat "artifacts/ansible-lint.log" | \
+            ansible-lint-to-junit-xml > "artifacts/ansible-lint-galaxy.junit.xml" 1>&1 || ANSIBLE_LINT_JUNIT=$?
+
+
+            if [ "${ANSIBLE_LINT_JUNIT}" ]; then
+
+              echo "exit_code=${ANSIBLE_LINT_JUNIT}" >> $GITHUB_OUTPUT
+
+            else
+
+              echo "exit_code=0" >> $GITHUB_OUTPUT
+
+            fi
+
+
+      - name: Check if JUnit Test Report was Successful
+        shell: bash
+        run: |
+          if [ ${{ steps.junit-test-report.outputs.exit_code }} -gt 0 ]; then
+
+            echo "[Error] ANSIBLE_LINT_JUNIT failed with ${{ steps.junit-test-report.outputs.exit_code }}";
+
+          fi
+
+
+      - name: Check if Linting Error Occurred
+        shell: bash
+        run: |
+          if [ ${{ steps.lint.outputs.exit_code }} -ge 3 ]; then
+
+            echo "[Error] ansible lint failed with  ${{ steps.lint.outputs.exit_code }}";
+            
+            exit ${{ steps.lint.outputs.exit_code }};
+
+          fi # don't fail the job?? 1=failed test, 2=failed command i.e. switch/flag
+
+
+      - name: Upload build Artifact
+        if: ${{ success() || failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-collection-lint-galaxy.yaml
+          path: artifacts/
+
+
+
+      - name: Force fail?
+        shell: bash
+        run: |
+
+          if [ ${{ steps.lint.outputs.exit_code }} -gt 0 ]; then
+
+            echo "[Trace] ANSIBLE_LINTING_MUST_PASS[${{ inputs.ANSIBLE_LINTING_MUST_PASS }}]";
+            
+            echo "[Error] ansible lint failed with ${{ steps.lint.outputs.exit_code }}";
+          
+            exit ${{ steps.lint.outputs.exit_code }};
+        
+          fi
+
+
+
+  lint-reports:
+    name: 'Linting Reports'
+    if: success() || failure()
+    needs:
+      - lint
+      - lint-galaxy-yaml
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_LINT_PATH: 'galaxy.y*'
+    steps:
+
+
+      - name: Ansible Lint Report (galaxy.yaml)
+        if: success() || failure()
+        uses: dorny/test-reporter@v1
+        with:
+          artifact: ansible-collection-lint-galaxy.yaml
+          name: Ansible Lint Report (galaxy.yaml)
+          path: 'ansible-lint-galaxy.junit.xml'
+          reporter: java-junit
+
+
+      - name: Ansible Lint Report
+        if: success() || failure()
+        uses: dorny/test-reporter@v1
+        with:
+          artifact: ansible-collection-lint
+          name: Ansible Lint Report
+          path: 'ansible-lint.junit.xml'
+          reporter: java-junit
+
+
+
+  build:
+    name: Build
+    needs:
+      - lint
+      - lint-galaxy-yaml
+    runs-on: ubuntu-latest
+    steps:
+
+
+      - name: Debug
+        shell: bash
+        run: |
+
+          echo "[Debug] ANSIBLE_GALAXY_NAMESPACE=${{ inputs.ANSIBLE_GALAXY_NAMESPACE }}";
+
+          echo "[Debug] ANSIBLE_GALAXY_PACKAGE_NAME=${{ inputs.ANSIBLE_GALAXY_PACKAGE_NAME }}";
+
+
+      - name: Checkout Code - ${{ github.ref_name }}
+        uses: actions/checkout@v4
+
+
+      - name: Install Python Dependencies
+        shell: bash
+        run: |
+          pip install \
+            ansible==9.2.0;
+
+
+      - name: Build
+        shell: bash
+        run: |
+          ansible-galaxy collection build . --verbose --force --output-path artifacts/galaxy/
+
+
+      - name: Upload build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ansible-collection
+          path: artifacts/galaxy/
+
+
+  test:
+    name: Test
+    if: false
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+
+      #
+      # ToDo: Create tests action
+      #
+      - name: Conduct Test
+        shell: bash
+        run: |
+          echo "test command";
+
+
+  publish:
+    name: Publish to Galaxy
+    if: ${{ github.ref_type == 'tag' }}
+    needs:
+      - lint
+      - lint-galaxy-yaml
+      - build
+    runs-on: ubuntu-latest
+    steps:
+
+
+      - name: Download Collection Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ansible-collection
+
+
+      - name: Install Dependencies
+        shell: bash
+        run: |
+          pip install \
+            ansible;
+
+
+      - name: Publish Collection to Ansible Galaxy
+        shell: bash
+        run: |
+          ansible-galaxy collection publish \
+            --server ${{ inputs.ANSIBLE_GALAXY_SERVER_URL }} \
+            --token ${{ secrets.ANSIBLE_GALAXY_UPLOAD_TOKEN }} \
+            --verbose artifacts/galaxy/${{ inputs.ANSIBLE_GALAXY_NAMESPACE }}-${{ inputs.ANSIBLE_GALAXY_PACKAGE_NAME }}-${{ github.ref_name }}.tar.gz;
+
+
+      - name: Amend release with Download Link
+        shell: bash
+        run: |
+          echo "Amend release with download link for the collection";
+
+
+
+  collection-release:
+    if: ${{(
+        github.ref_type == 'tag'
+          &&
+        inputs.ANSIBLE_COLLECTION_MARK_RELEASE_LIVE
+      )}}
+    needs:
+      - publish
+    name: Mark Release Live
+    runs-on: ubuntu-latest
+    steps:
+
+
+      - name: Publish Release
+        uses: grzegorzkrukowski/action-publish-github-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
