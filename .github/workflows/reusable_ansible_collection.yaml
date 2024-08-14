@@ -38,6 +38,14 @@ on:
         required: false
 
 
+permissions:
+  pull-requests: write
+  contents: write
+  statuses: write
+  checks: write
+  actions: write
+
+
 jobs:
 
 
@@ -293,8 +301,6 @@ jobs:
       - lint
       - lint-galaxy-yaml
     runs-on: ubuntu-latest
-    env:
-      ANSIBLE_LINT_PATH: 'galaxy.y*'
     steps:
 
 
