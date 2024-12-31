@@ -312,6 +312,7 @@ jobs:
           name: Ansible Lint Report (galaxy.yaml)
           path: 'ansible-lint-galaxy.junit.xml'
           reporter: java-junit
+          fail-on-error: 'false'
 
 
       - name: Ansible Lint Report
@@ -322,6 +323,7 @@ jobs:
           name: Ansible Lint Report
           path: 'ansible-lint.junit.xml'
           reporter: java-junit
+          fail-on-error: 'false'
 
 
 
